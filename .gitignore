@@ -1,0 +1,6 @@
+chroma_db/
+tmp/
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
