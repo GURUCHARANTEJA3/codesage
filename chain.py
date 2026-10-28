@@ -1,73 +1,57 @@
 import streamlit as st
-from groq import Groq
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-def get_qa_chain(vectorstore, k=2, temperature=0.1):
+def get_qa_chain(vectorstore, k=6, temperature=0.4):
     api_key = st.secrets.get("GROQ_API_KEY")
     if not api_key:
-        st.error("API Key missing.")
         return None
 
-    # THE ULTIMATE STABLE LIST
-    # We use 'llama3-8b-8192' first because it is the most common ID in Groq history.
-    models_to_try = [
-        "llama3-8b-8192",
-        "llama-3.2-3b-preview",
-        "llama-3.2-1b-preview"
-    ]
+    # We use the most powerful model available on the Personal Tier
+    # This model can handle HUGE, DEEP answers.
+    model_id = "llama-3.3-70b-versatile"
     
-    llm = None
-    working_model = ""
-    
-    # Try the stable list
-    for model_id in models_to_try:
-        try:
-            temp_llm = ChatGroq(api_key=api_key, model_name=model_id, temperature=temperature, max_tokens=400)
-            temp_llm.invoke("Hi") # Test
-            llm = temp_llm
-            working_model = model_id
-            break
-        except Exception:
-            continue
+    try:
+        llm = ChatGroq(
+            api_key=api_key, 
+            model_name=model_id,
+            temperature=temperature,
+            max_tokens=4000 # SET TO 4000 FOR MASSIVE, DEEP ANSWERS
+        )
+    except Exception:
+        # Fallback to the 8B if the 70B is busy
+        llm = ChatGroq(api_key=api_key, model_name="llama-3.1-8b-instant", max_tokens=2000)
 
-    # DEBUG: If the stable list fails, we find out what you DO have
-    if not llm:
-        try:
-            client = Groq(api_key=api_key)
-            all_available = [m.id for m in client.models.list().data]
-            st.warning(f"Searching for models... Found: {all_available}")
-            
-            # Filter for anything that isn't safety or whisper
-            chat_models = [m for m in all_available if "guard" not in m and "whisper" not in m and "canopy" not in m]
-            if chat_models:
-                working_model = chat_models[0]
-                llm = ChatGroq(api_key=api_key, model_name=working_model, temperature=temperature, max_tokens=400)
-        except Exception as e:
-            st.error(f"Critical Error: {e}")
-            return None
-
-    if not llm:
-        st.error("No compatible chat models found in your Groq account.")
-        return None
-
-    st.toast(f"Connected to: {working_model}")
-
-    # --- RAG Logic ---
+    # We take 6 snippets so the AI has 3x more information to read
     retriever = vectorstore.as_retriever(search_kwargs={"k": k})
 
     def format_docs(docs):
-        # Extremely small chunks to prevent Error 400 (Context too long)
-        return "\n\n".join(f"File: {d.metadata.get('file_path')}\n{d.page_content[:500]}" for d in docs)
+        # Full snippets for deep analysis
+        return "\n\n".join(f"FILE: {d.metadata.get('file_path')}\n{d.page_content}" for d in docs)
 
-    template = """You are CodeSage. Answer based on the code provided. 
-    Be short. Cite file path.
-    
-    Context: {context}
-    Question: {question}
-    Answer:"""
+    # THE ULTIMATE "DEEP ANALYSIS" PROMPT
+    template = """You are CodeSage, a Distinguished Principal Engineer. 
+    The user wants an EXHAUSTIVE, DEEP, and COMPLETE analysis of the project.
+
+    Please provide a massive, detailed report covering:
+    1. ARCHITECTURAL BLUEPRINT: Explain the design patterns and the high-level system flow.
+    2. DEEP LOGIC DIVE: For every file mentioned in the context, explain the exact logic, the variables, and the algorithms used.
+    3. DATA JOURNEY: How does data enter, move through, and exit the system?
+    4. TECHNICAL EXPERTISE: Highlight the most sophisticated parts of this codebase. Why is this project impressive?
+    5. RECOMMENDATIONS: How would you scale this? What are the potential bottlenecks?
+
+    Format this with clear headers, bold text, and extensive code explanations. 
+    Do not be brief. Be as detailed as possible.
+
+    CONTEXT:
+    {context}
+
+    QUESTION: 
+    {question}
+
+    PRINCIPAL ENGINEER'S DEEP ANALYSIS:"""
     
     prompt = ChatPromptTemplate.from_template(template)
 
