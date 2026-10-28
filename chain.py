@@ -14,7 +14,7 @@ def get_qa_chain(vectorstore, k=6, temperature=0.1):
 
     llm = ChatGroq(
         groq_api_key=groq_api_key,
-        model_name="mixtral-8x7b-32768",
+        model_name="llama-3.2-3b-preview",
         temperature=temperature
     )
 
