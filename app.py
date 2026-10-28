@@ -45,18 +45,11 @@ if index_btn and repo_url:
             st.error(f"Error: {str(e)}")
 
 # UI Main Pane
+# --- CHAT INTERFACE ---
 st.title("🧠 CodeSage")
-st.caption("Chat with any GitHub repository using RAG (Llama 3 + ChromaDB)")
 
-if not st.session_state.repo_indexed:
+if not st.session_state.get("repo_indexed"):
     st.info("👈 Enter a GitHub URL and click **Index Repository** to get started.")
-    # Example Quick Start
-    st.markdown("""
-    ### How it works:
-    1. **Clone**: We shallow-clone the repo.
-    2. **Embed**: We use local `all-MiniLM-L6-v2` to process code chunks.
-    3. **RAG**: We use Groq's Llama-3-70B for fast, intelligent answers.
-    """)
 else:
     # Display Chat History
     for message in st.session_state.messages:
@@ -65,36 +58,51 @@ else:
             if "sources" in message:
                 render_source_explorer(message["sources"])
 
-   # Chat Input
-    if user_input := st.chat_input("Ask about the code..."):
-        st.session_state.messages.append({"role": "user", "content": user_input})
+    # Chat Input
+    if user_prompt := st.chat_input("Ask CodeSage anything..."):
+        # 1. Display user message
+        st.session_state.messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
-            st.markdown(user_input)
+            st.markdown(user_prompt)
 
+        # 2. Generate Assistant Response
         with st.chat_message("assistant"):
             try:
-                # Use k=3 for stability
-                chain = get_qa_chain(st.session_state.vectorstore, k=3)
+                # Use the k and temp from the sidebar
+                chain = get_qa_chain(st.session_state.vectorstore, k=k, temperature=temp)
                 
                 if chain:
-                    with st.spinner("Analyzing..."):
+                    with st.spinner("CodeSage is thinking..."):
+                        # Format history for the chain
+                        chat_history = []
+                        for m in st.session_state.messages[:-1]:
+                            from langchain_core.messages import HumanMessage, AIMessage
+                            if m["role"] == "user":
+                                chat_history.append(HumanMessage(content=m["content"]))
+                            else:
+                                chat_history.append(AIMessage(content=m["content"]))
+
                         # Invoke the chain
-                        answer = chain.invoke(user_input)
+                        answer = chain.invoke({
+                            "input": user_prompt,
+                            "chat_history": chat_history
+                        })
                         
                         # Get sources for display
-                        sources = st.session_state.vectorstore.similarity_search(user_input, k=3)
+                        sources = st.session_state.vectorstore.similarity_search(user_prompt, k=k)
                         
+                        # Render result
                         st.markdown(answer)
                         render_source_explorer(sources)
                         
+                        # Save to state
                         st.session_state.messages.append({
                             "role": "assistant", 
                             "content": answer, 
                             "sources": sources
                         })
             except Exception as e:
-                # If Error 400 still happens, this will tell us exactly why
-                st.error(f"Error: {str(e)}")
+                st.error(f"App Error: {str(e)}")
     if st.button("Clear Chat"):
         st.session_state.messages = []
         st.rerun()
