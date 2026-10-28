@@ -66,7 +66,6 @@ else:
                 render_source_explorer(message["sources"])
 
     # Chat Input
-    # Chat Input
     if user_input := st.chat_input("Ask a question about the code..."):
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
@@ -74,13 +73,15 @@ else:
 
         with st.chat_message("assistant"):
             try:
+                # 1. Get the chain
                 chain = get_qa_chain(st.session_state.vectorstore, k, temp)
+                
                 if chain:
                     with st.spinner("Analyzing codebase..."):
-                        # Correctly passing the question to the chain
+                        # 2. Run the chain (Passing user_input directly)
                         answer = chain.invoke(user_input)
                         
-                        # Get sources for display
+                        # 3. Get sources separately for the UI display
                         sources = st.session_state.vectorstore.similarity_search(user_input, k=k)
                         
                         st.markdown(answer)
@@ -92,7 +93,7 @@ else:
                             "sources": sources
                         })
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Application Error: {str(e)}")
     if st.button("Clear Chat"):
         st.session_state.messages = []
         st.rerun()

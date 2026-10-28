@@ -5,52 +5,34 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 def get_qa_chain(vectorstore, k=6, temperature=0.1):
-    # 1. Securely fetch the API Key
+    # 1. Fetch API Key
     api_key = st.secrets.get("GROQ_API_KEY")
-    
     if not api_key:
-        st.error("🚨 API KEY MISSING: Please add GROQ_API_KEY to your Streamlit Secrets.")
+        st.error("API Key missing from Secrets.")
         return None
 
-    # 2. List of models to try (Priority order)
-    models_to_try = [
-        "llama-3.3-70b-versatile", 
-        "llama3-8b-8192",
-        "llama-3.1-8b-instant"
-    ]
-    
-    llm = None
-    # 3. Try each model until one works
-    for model_id in models_to_try:
-        try:
-            temp_llm = ChatGroq(
-                groq_api_key=api_key, 
-                model_name=model_id,
-                temperature=temperature
-            )
-            # Test connection with a simple string
-            temp_llm.invoke("Ping")
-            llm = temp_llm
-            break 
-        except Exception:
-            continue
-
-    if not llm:
-        st.error("❌ CONNECTION FAILED: Groq is currently unavailable. Check your API key.")
+    # 2. Initialize Model (Using the most stable ID)
+    try:
+        llm = ChatGroq(
+            api_key=api_key,
+            model_name="llama-3.3-70b-versatile",
+            temperature=temperature
+        )
+    except Exception as e:
+        st.error(f"LLM Initialization Error: {e}")
         return None
 
-    # 4. Set up the retriever
+    # 3. Define the Retriever
     retriever = vectorstore.as_retriever(search_kwargs={"k": k})
 
-    # 5. Helper function to format the code snippets
+    # 4. Helper to format code snippets
     def format_docs(docs):
         return "\n\n".join(f"--- File: {d.metadata.get('file_path')} ---\n{d.page_content}" for d in docs)
 
-    # 6. The RAG Prompt Template
-    template = """You are CodeSage, an expert AI code assistant. 
-    Use the following pieces of retrieved context to answer the question. 
-    If you don't know the answer, say you don't know. 
-    ALWAYS cite the file path. Use markdown for code blocks.
+    # 5. The Prompt (Uses 'context' and 'question')
+    template = """You are CodeSage, an expert AI code assistant.
+    Use the following pieces of context to answer the question.
+    Cite file paths for every claim.
 
     Context:
     {context}
@@ -58,12 +40,16 @@ def get_qa_chain(vectorstore, k=6, temperature=0.1):
     Question: {question}
     Answer:"""
     
-    prompt_template = ChatPromptTemplate.from_template(template)
+    prompt = ChatPromptTemplate.from_template(template)
 
-    # 7. The LCEL Chain (Connects everything)
+    # 6. The LCEL Chain
+    # We map 'user_input' to 'question' and 'retriever' to 'context'
     rag_chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt_template
+        {
+            "context": retriever | format_docs, 
+            "question": RunnablePassthrough()
+        }
+        | prompt
         | llm
         | StrOutputParser()
     )
