@@ -9,7 +9,7 @@ def render_sidebar():
         st.divider()
         
         with st.expander("Model Configuration"):
-            k = st.slider("Retrieval K (chunks)", 1, 10, 6)
+            k = st.slider("Retrieval K (chunks)", 1, 5, 2)
             temp = st.slider("Temperature", 0.0, 1.0, 0.1)
             
         st.divider()
