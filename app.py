@@ -73,27 +73,21 @@ else:
 
         with st.chat_message("assistant"):
             try:
-                # 1. Get the chain
-                chain = get_qa_chain(st.session_state.vectorstore, k, temp)
-                
+                chain = get_qa_chain(st.session_state.vectorstore)
                 if chain:
-                    with st.spinner("Analyzing codebase..."):
-                        # 2. Run the chain (Passing user_input directly)
+                    with st.spinner("Checking code..."):
+                        # We ONLY pass the user_input, NO history.
                         answer = chain.invoke(user_input)
                         
-                        # 3. Get sources separately for the UI display
-                        sources = st.session_state.vectorstore.similarity_search(user_input, k=k)
-                        
                         st.markdown(answer)
-                        render_source_explorer(sources)
                         
+                        # Save to history for display ONLY, not for the LLM
                         st.session_state.messages.append({
                             "role": "assistant", 
-                            "content": answer, 
-                            "sources": sources
+                            "content": answer
                         })
             except Exception as e:
-                st.error(f"Application Error: {str(e)}")
+                st.error(f"Error: {str(e)}")
     if st.button("Clear Chat"):
         st.session_state.messages = []
         st.rerun()
