@@ -4,14 +4,15 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-def get_qa_chain(vectorstore, k=1, temperature=0.1): # Only 1 single chunk
+def get_qa_chain(vectorstore, k=3, temperature=0.1):
     api_key = st.secrets.get("GROQ_API_KEY")
     if not api_key:
-        st.error("API Key missing.")
+        st.error("API Key missing from Secrets.")
         return None
 
-    # Use the 8B model - it has the highest limits
-    model_id = "meta-llama/llama-prompt-guard-2-22m"
+    # We use the 8B model. It is 10x faster and has much higher limits than the 70B.
+    # NEVER use 'prompt-guard' here; it only gives numbers, not answers.
+    model_id = "llama-3.1-8b-instant"
     
     try:
         llm = ChatGroq(
@@ -20,26 +21,28 @@ def get_qa_chain(vectorstore, k=1, temperature=0.1): # Only 1 single chunk
             temperature=temperature
         )
     except Exception as e:
+        st.error(f"LLM Config Error: {e}")
         return None
 
-    # k=1 is the absolute minimum (only one piece of code)
+    # k=3 retrieves 3 snippets of code
     retriever = vectorstore.as_retriever(search_kwargs={"k": k})
 
     def format_docs(docs):
-        # Extreme truncation: Only 400 characters
-        if not docs: return ""
-        content = docs[0].page_content[:400] 
-        file_path = docs[0].metadata.get('file_path', 'code')
-        return f"File: {file_path}\nContent: {content}"
+        # We limit each snippet to 800 characters to prevent Error 400
+        return "\n\n".join(f"File: {d.metadata.get('file_path')}\n{d.page_content[:800]}" for d in docs)
 
-    # Minimalist prompt with NO history placeholders
-    template = """Answer briefly based ONLY on this:
+    template = """You are CodeSage. Answer the question using the provided code context.
+    If the answer isn't in the code, say you don't know. Cite file paths.
+
+    Context:
     {context}
-    Question: {question}"""
+
+    Question: {question}
+    Answer:"""
     
     prompt = ChatPromptTemplate.from_template(template)
 
-    # This chain is now "Stateless" (It doesn't look at old messages)
+    # Simplified LCEL Chain
     rag_chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
         | prompt

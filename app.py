@@ -65,28 +65,35 @@ else:
             if "sources" in message:
                 render_source_explorer(message["sources"])
 
-    # Chat Input
-    if user_input := st.chat_input("Ask a question about the code..."):
+   # Chat Input
+    if user_input := st.chat_input("Ask about the code..."):
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
         with st.chat_message("assistant"):
             try:
-                chain = get_qa_chain(st.session_state.vectorstore)
+                # Use k=3 for stability
+                chain = get_qa_chain(st.session_state.vectorstore, k=3)
+                
                 if chain:
-                    with st.spinner("Checking code..."):
-                        # We ONLY pass the user_input, NO history.
+                    with st.spinner("Analyzing..."):
+                        # Invoke the chain
                         answer = chain.invoke(user_input)
                         
-                        st.markdown(answer)
+                        # Get sources for display
+                        sources = st.session_state.vectorstore.similarity_search(user_input, k=3)
                         
-                        # Save to history for display ONLY, not for the LLM
+                        st.markdown(answer)
+                        render_source_explorer(sources)
+                        
                         st.session_state.messages.append({
                             "role": "assistant", 
-                            "content": answer
+                            "content": answer, 
+                            "sources": sources
                         })
             except Exception as e:
+                # If Error 400 still happens, this will tell us exactly why
                 st.error(f"Error: {str(e)}")
     if st.button("Clear Chat"):
         st.session_state.messages = []
