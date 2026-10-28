@@ -11,60 +11,59 @@ def get_qa_chain(vectorstore, k=2, temperature=0.1):
         st.error("API Key missing.")
         return None
 
-    # --- FILTERED MODEL DISCOVERY ---
-    try:
-        client = Groq(api_key=api_key)
-        # We get the list but FILTER OUT the ones that cause errors (Canopy, Prompt-Guard, etc.)
-        all_models = client.models.list().data
-        
-        # We only want Meta (Llama), Mistral, or Gemma models
-        allowed_keywords = ["llama", "mixtral", "gemma", "70b", "8b"]
-        blocked_keywords = ["canopy", "guard", "whisper", "vision", "preview"]
-        
-        chat_model_ids = [
-            m.id for m in all_models 
-            if any(k in m.id.lower() for k in allowed_keywords)
-            and not any(b in m.id.lower() for b in blocked_keywords)
-        ]
-        
-        # Priority order: We want Llama 3.1 8B first for high free-tier limits
-        model_id = "llama-3.1-8b-instant" # Safe default
-        
-        if chat_model_ids:
-            # If our preferred model is in the list, use it. Otherwise use the first allowed one.
-            if "llama-3.1-8b-instant" in chat_model_ids:
-                model_id = "llama-3.1-8b-instant"
-            elif "llama3-8b-8192" in chat_model_ids:
-                model_id = "llama3-8b-8192"
-            else:
-                model_id = chat_model_ids[0]
-                
-        st.toast(f"Connected to: {model_id}")
-    except Exception:
-        # Fallback if discovery fails
-        model_id = "llama3-8b-8192"
-    # -------------------------------
+    # THE ULTIMATE STABLE LIST
+    # We use 'llama3-8b-8192' first because it is the most common ID in Groq history.
+    models_to_try = [
+        "llama3-8b-8192",
+        "llama-3.2-3b-preview",
+        "llama-3.2-1b-preview"
+    ]
+    
+    llm = None
+    working_model = ""
+    
+    # Try the stable list
+    for model_id in models_to_try:
+        try:
+            temp_llm = ChatGroq(api_key=api_key, model_name=model_id, temperature=temperature, max_tokens=400)
+            temp_llm.invoke("Hi") # Test
+            llm = temp_llm
+            working_model = model_id
+            break
+        except Exception:
+            continue
 
-    try:
-        # max_tokens=500 is a safe 'middle ground' for all free tiers
-        llm = ChatGroq(
-            api_key=api_key, 
-            model_name=model_id,
-            temperature=temperature,
-            max_tokens=500
-        )
-    except Exception as e:
-        st.error(f"LLM Setup Error: {e}")
+    # DEBUG: If the stable list fails, we find out what you DO have
+    if not llm:
+        try:
+            client = Groq(api_key=api_key)
+            all_available = [m.id for m in client.models.list().data]
+            st.warning(f"Searching for models... Found: {all_available}")
+            
+            # Filter for anything that isn't safety or whisper
+            chat_models = [m for m in all_available if "guard" not in m and "whisper" not in m and "canopy" not in m]
+            if chat_models:
+                working_model = chat_models[0]
+                llm = ChatGroq(api_key=api_key, model_name=working_model, temperature=temperature, max_tokens=400)
+        except Exception as e:
+            st.error(f"Critical Error: {e}")
+            return None
+
+    if not llm:
+        st.error("No compatible chat models found in your Groq account.")
         return None
 
+    st.toast(f"Connected to: {working_model}")
+
+    # --- RAG Logic ---
     retriever = vectorstore.as_retriever(search_kwargs={"k": k})
 
     def format_docs(docs):
-        # We take only 2 snippets and limit length to avoid the 400 error
-        return "\n\n".join(f"File: {d.metadata.get('file_path')}\n{d.page_content[:700]}" for d in docs)
+        # Extremely small chunks to prevent Error 400 (Context too long)
+        return "\n\n".join(f"File: {d.metadata.get('file_path')}\n{d.page_content[:500]}" for d in docs)
 
-    template = """You are CodeSage. Answer the question using the code context below.
-    BE CONCISE. Cite the file path.
+    template = """You are CodeSage. Answer based on the code provided. 
+    Be short. Cite file path.
     
     Context: {context}
     Question: {question}
