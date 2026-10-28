@@ -11,7 +11,7 @@ def get_qa_chain(vectorstore, k=1, temperature=0.1): # Only 1 single chunk
         return None
 
     # Use the 8B model - it has the highest limits
-    model_id = "llama-3.1-8b-instant"
+    model_id = "meta-llama/llama-prompt-guard-2-22m"
     
     try:
         llm = ChatGroq(
