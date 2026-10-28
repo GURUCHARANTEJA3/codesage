@@ -66,32 +66,33 @@ else:
                 render_source_explorer(message["sources"])
 
     # Chat Input
-    if prompt := st.chat_input("Ask a question about the code..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    # Chat Input
+    if user_input := st.chat_input("Ask a question about the code..."):
+        st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_input)
 
         with st.chat_message("assistant"):
             try:
                 chain = get_qa_chain(st.session_state.vectorstore, k, temp)
-                with st.spinner("Analyzing codebase..."):
-                    # This simplified call matches the new LCEL chain
-                    answer = chain.invoke(prompt)
-                    
-                    # Get sources separately for the UI
-                    sources = st.session_state.vectorstore.similarity_search(prompt, k=k)
-                    
-                    st.markdown(answer)
-                    render_source_explorer(sources)
-                    
-                    st.session_state.messages.append({
-                        "role": "assistant", 
-                        "content": answer, 
-                        "sources": sources
-                    })
+                if chain:
+                    with st.spinner("Analyzing codebase..."):
+                        # Correctly passing the question to the chain
+                        answer = chain.invoke(user_input)
+                        
+                        # Get sources for display
+                        sources = st.session_state.vectorstore.similarity_search(user_input, k=k)
+                        
+                        st.markdown(answer)
+                        render_source_explorer(sources)
+                        
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": answer, 
+                            "sources": sources
+                        })
             except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-
+                st.error(f"Error: {str(e)}")
     if st.button("Clear Chat"):
         st.session_state.messages = []
         st.rerun()

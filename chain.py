@@ -1,58 +1,46 @@
 import streamlit as st
-import os
 from langchain_groq import ChatGroq
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 def get_qa_chain(vectorstore, k=6, temperature=0.1):
-    groq_api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+    groq_api_key = st.secrets.get("GROQ_API_KEY")
     
     if not groq_api_key:
-        st.error("Groq API Key not found.")
+        st.error("Groq API Key not found in Streamlit Secrets.")
         return None
 
-    # List of models to try in order of quality
-    # Groq changes these frequently, so we try the whole list!
-    models_to_try = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "llama3-8b-8192",
-        "gemma2-9b-it"
-    ]
+    # THE ONLY MODELS GROQ SUPPORTS FOR FREE RIGHT NOW
+    models_to_try = ["llama-3.2-3b-preview", "llama-3.1-8b-instant"]
     
     llm = None
-    
-    # Try each model until one works
-    for model in models_to_try:
+    for model_id in models_to_try:
         try:
-            llm = ChatGroq(
-                groq_api_key=groq_api_key,
-                model_name=model,
-                temperature=temperature,
-                max_retries=1
+            test_llm = ChatGroq(
+                api_key=groq_api_key,
+                model_name=model_id,
+                temperature=temperature
             )
-            # Test if the model works with a tiny dummy call
-            llm.invoke("test") 
-            break # If it works, stop the loop
+            # Verify if it works
+            test_llm.invoke("Hi")
+            llm = test_llm
+            break
         except Exception:
-            continue # If it fails, try the next model in the list
+            continue
 
-    if llm is None:
-        st.error("Could not connect to any Groq models. Please check your API key and Tier.")
+    if not llm:
+        st.error("No working Groq models found. Check your API key.")
         return None
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": k})
 
-    # This combines the retrieved documents into one string
     def format_docs(docs):
-        return "\n\n".join(f"--- {d.metadata['file_path']} ---\n{d.page_content}" for d in docs)
+        return "\n\n".join(f"File: {d.metadata.get('file_path')}\n{d.page_content}" for d in docs)
 
-    # The Prompt
-    template = """You are CodeSage, an expert AI code assistant. 
-    Use the retrieved context to answer the question. 
-    If you don't know the answer, say you don't know. 
-    CITE file paths. Use markdown for code blocks.
+    # Simplified Prompt to avoid warnings
+    template = """You are CodeSage, an expert AI assistant. Use the code context to answer.
+    If you don't know, say you don't know. Cite the file paths.
 
     Context:
     {context}
@@ -60,12 +48,12 @@ def get_qa_chain(vectorstore, k=6, temperature=0.1):
     Question: {question}
     Answer:"""
     
-    prompt = ChatPromptTemplate.from_template(template)
+    prompt_template = ChatPromptTemplate.from_template(template)
 
-    # The Chain (LCEL style)
+    # The modern LCEL chain
     rag_chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
+        | prompt_template
         | llm
         | StrOutputParser()
     )
