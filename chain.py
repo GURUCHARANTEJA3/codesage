@@ -4,47 +4,41 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-def get_qa_chain(vectorstore, k=6, temperature=0.3):
+def get_qa_chain(vectorstore, k=4, temperature=0.2):
     api_key = st.secrets.get("GROQ_API_KEY")
     if not api_key:
         return None
 
-    # THE "DAY 1" SAGE MODEL
-    model_id = "llama-3.3-70b-versatile"
+    # THE ONLY MODEL IN YOUR LIST WITH "DAY 1" SMARTNESS
+    # This 120B model provides the deep, clear info you are looking for.
+    model_id = "openai/gpt-oss-120b"
     
-    llm = ChatGroq(
-        api_key=api_key, 
-        model_name=model_id, 
-        temperature=temperature
-    )
+    try:
+        # We use max_tokens=800 to stay under your account's 1000-token limit
+        # while still allowing a deep, structured answer.
+        llm = ChatGroq(
+            api_key=api_key, 
+            model_name=model_id, 
+            temperature=temperature,
+            max_tokens=800
+        )
+    except Exception:
+        # Fallback to the 20B version if the big one is busy
+        llm = ChatGroq(api_key=api_key, model_name="openai/gpt-oss-20b", max_tokens=600)
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": k})
 
-    # --- STEP 1: CONTEXTUALIZE QUESTION ---
-    contextualize_q_system_prompt = (
-        "Given a chat history and the latest user question "
-        "which might reference context in the chat history, "
-        "formulate a standalone question which can be understood "
-        "without the chat history."
-    )
-    contextualize_q_prompt = ChatPromptTemplate.from_messages([
-        ("system", contextualize_q_system_prompt),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-    ])
-    
-    contextualize_chain = contextualize_q_prompt | llm | StrOutputParser()
+    # --- THE "SAGE" PROMPT (Restoring Day 1 Quality) ---
+    system_prompt = """You are CodeSage, a Senior Software Architect and Mentor. 
+    Analyze the project codebase and provide a DEEP, TECHNICAL, and CLEAR explanation.
 
-    # --- STEP 2: THE "SAGE" PROMPT (Day 1 Deep Quality) ---
-    system_prompt = """You are CodeSage, a world-class Software Architect. 
-    Provide DEEP, CLEAR, and PROFESSIONAL explanations based on the context.
+    Structure your answer as follows:
+    1. PURPOSE: What is the core logic and goal of this project?
+    2. ARCHITECTURE: How do the components and files interact?
+    3. DATA FLOW: How does information move through the system?
+    4. CITATIONS: Clearly state which files you are referencing.
 
-    1. DEEP DIVE: Explain the 'Why' behind the logic.
-    2. ARCHITECTURE: Describe how components interact.
-    3. CITATIONS: Cite file paths clearly.
-
-    CONTEXT:
-    {context}"""
+    Tone: Professional, helpful, and high-level. Be as detailed as possible within your token limit."""
 
     qa_prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
@@ -52,19 +46,15 @@ def get_qa_chain(vectorstore, k=6, temperature=0.3):
         ("human", "{input}"),
     ])
 
-    # --- STEP 3: FORMATTING ---
     def format_docs(docs):
-        # We take a slightly smaller slice (1200 chars) to prevent the "Length Error"
-        return "\n\n".join(f"--- FILE: {d.metadata.get('file_path')} ---\n{d.page_content[:1200]}" for d in docs)
+        # We take 800 characters per file to give the 120B model deep info to read
+        return "\n\n".join(f"--- FILE: {d.metadata.get('file_path')} ---\n{d.page_content[:800]}" for d in docs)
 
-    # --- STEP 4: THE MASTER CHAIN ---
-    def get_context(input_dict):
-        standalone_query = contextualize_chain.invoke(input_dict)
-        docs = retriever.get_relevant_documents(standalone_query)
-        return format_docs(docs)
-
+    # The Modern LCEL Chain (Compatible with Python 3.13)
     rag_chain = (
-        RunnablePassthrough.assign(context=get_context)
+        RunnablePassthrough.assign(
+            context=lambda x: format_docs(retriever.invoke(x["input"]))
+        )
         | qa_prompt
         | llm
         | StrOutputParser()
